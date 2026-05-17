@@ -8,7 +8,9 @@ use crate::settings::Settings;
 use seahorse::{App, Context, Flag, FlagType};
 use sha1::Digest;
 use std::env;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
+use std::sync::Arc;
 use std::thread;
 
 fn main() {
@@ -158,9 +160,13 @@ fn bruteforce(settings: Settings, commit_object: &CommitObject, job_count: usize
     println!();
 
     while found_hash.is_empty() {
+        // ブロック内の全スレッドで共有する「発見済み」フラグ
+        let found = Arc::new(AtomicBool::new(false));
+
         for i in 0..job_count {
             let settings: Settings = settings.clone();
             let tx = tx.clone();
+            let found = Arc::clone(&found);
             let mut co = commit_object.clone();
 
             thread::spawn(move || {
@@ -174,11 +180,17 @@ fn bruteforce(settings: Settings, commit_object: &CommitObject, job_count: usize
                 let suffix = co.suffix_bytes();
 
                 for _ in 0..1u64 << settings.block_size {
+                    // 他スレッドが発見済みなら即終了
+                    if found.load(Ordering::Relaxed) {
+                        tx.send(None).unwrap();
+                        return;
+                    }
                     let mut h = prefix_hasher.clone();
                     h.update(commit_hash.as_bytes()); // 40 bytes (committer name)
                     h.update(&suffix);
                     let next_hash = format!("{:x}", h.finalize());
                     if settings.patterns.iter().any(|p| next_hash.starts_with(p)) {
+                        found.store(true, Ordering::Relaxed);
                         tx.send(Some(commit_hash)).unwrap();
                         return;
                     }
