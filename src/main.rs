@@ -103,11 +103,10 @@ fn art(c: &Context) {
     }
 
     let new_committer_name = bruteforce(settings.clone(), &co, settings.jobs);
-    command::filter_branch(&settings.path, &latest_commit_hash, &new_committer_name);
-    let latest_commit_hash = command::latest_commit_hash(&settings.path);
+    let new_hash = command::replace_latest_commit(&settings.path, &co, &new_committer_name);
     println!(
         "Yay! Now your new hash of the latest commit is \x1b[31m{}\x1b[m.",
-        latest_commit_hash
+        new_hash
     );
 }
 
