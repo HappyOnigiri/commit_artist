@@ -5,7 +5,7 @@ use regex::Regex;
 #[derive(Clone)]
 pub struct Settings {
     pub path: String,
-    pub pattern: String,
+    pub patterns: Vec<String>,
     pub block_size: usize,
     pub jobs: usize,
 }
@@ -15,29 +15,43 @@ impl Settings {
     /// Construct.
     ///
     /// # Panics
-    /// pattern chars length should be 1..=40
+    /// patterns is a comma-separated list of hex strings (each 1..=40 chars)
     /// jobs should be more than 0
     /// block size should be less than 64.
     ///
-    pub fn new<T: Into<String>>(path: T, pattern: T, block_size: usize, jobs: usize) -> Self {
-        let pattern: String = pattern.into();
+    pub fn new<P: Into<String>, Q: Into<String>>(path: P, patterns: Q, block_size: usize, jobs: usize) -> Self {
         let regx = Regex::new(r"^[0-9a-f]{1,40}$").unwrap();
-        assert!(regx.is_match(&pattern));
+        let patterns: Vec<String> = patterns
+            .into()
+            .split(',')
+            .map(|p| p.trim().to_owned())
+            .collect();
+        assert!(!patterns.is_empty());
+        for p in &patterns {
+            assert!(regx.is_match(p));
+        }
         assert!(jobs > 0);
         assert!(block_size < 64);
         Self {
             path: path.into(),
-            pattern,
+            patterns,
             block_size,
             jobs,
         }
     }
 
-    pub fn pattern<T: Into<String>>(&mut self, pattern: T) {
-        let pattern: String = pattern.into();
+    pub fn patterns<T: Into<String>>(&mut self, patterns: T) {
         let regx = Regex::new(r"^[0-9a-f]{1,40}$").unwrap();
-        assert!(regx.is_match(&pattern));
-        self.pattern = pattern;
+        let parsed: Vec<String> = patterns
+            .into()
+            .split(',')
+            .map(|p| p.trim().to_owned())
+            .collect();
+        assert!(!parsed.is_empty());
+        for p in &parsed {
+            assert!(regx.is_match(p));
+        }
+        self.patterns = parsed;
     }
 
     pub fn jobs(&mut self, jobs: usize) {
@@ -55,7 +69,7 @@ impl Default for Settings {
     fn default() -> Self {
         let path: String = command::current_dir_path();
         let num = num_cpus::get();
-        Self::new(path, "0000000".to_owned(), 20, num - 1)
+        Self::new(path, "0000000", 20, num - 1)
     }
 }
 
