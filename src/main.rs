@@ -6,6 +6,7 @@ use crate::external_command as command;
 use crate::git::commit_object::CommitObject;
 use crate::settings::Settings;
 use seahorse::{App, Context, Flag, FlagType};
+use sha1::Digest;
 use std::env;
 use std::sync::mpsc::channel;
 use std::thread;
@@ -123,10 +124,15 @@ fn bench_hash_rate(commit_object: &CommitObject, jobs: usize) {
             co.committer.name.push_str(&i.to_string());
             co.committer.name = co.to_sha1();
             let mut hash = co.to_sha1();
+            // midstate: prefix/suffix を一度だけ構築
+            let prefix_hasher = co.prefix_hasher();
+            let suffix = co.suffix_bytes();
             let mut count: u64 = 0;
             while start.elapsed() < duration {
-                co.committer.name = hash.clone();
-                hash = co.to_sha1();
+                let mut h = prefix_hasher.clone();
+                h.update(hash.as_bytes()); // 40 bytes (committer name)
+                h.update(&suffix);
+                hash = format!("{:x}", h.finalize());
                 count += 1;
             }
             tx.send(count).unwrap();
@@ -158,17 +164,25 @@ fn bruteforce(settings: Settings, commit_object: &CommitObject, job_count: usize
             let mut co = commit_object.clone();
 
             thread::spawn(move || {
+                // シードで name を変えて各スレッドの探索空間を分散させる
                 co.committer.name.push_str(&(iteration_count * job_count + i).to_string());
-                let mut commit_hash = co.to_sha1();
+                let mut commit_hash = co.to_sha1(); // 40文字ハッシュ
+
+                // name が 40文字に確定したので midstate を構築（ループ外で1回のみ）
+                co.committer.name = commit_hash.clone();
+                let prefix_hasher = co.prefix_hasher();
+                let suffix = co.suffix_bytes();
 
                 for _ in 0..1u64 << settings.block_size {
-                    co.committer.name = commit_hash.clone();
-                    let pre = commit_hash.clone();
-                    commit_hash = co.to_sha1();
-                    if settings.patterns.iter().any(|p| commit_hash.starts_with(p.as_str())) {
-                        tx.send(Some(pre)).unwrap();
+                    let mut h = prefix_hasher.clone();
+                    h.update(commit_hash.as_bytes()); // 40 bytes (committer name)
+                    h.update(&suffix);
+                    let next_hash = format!("{:x}", h.finalize());
+                    if settings.patterns.iter().any(|p| next_hash.starts_with(p)) {
+                        tx.send(Some(commit_hash)).unwrap();
                         return;
                     }
+                    commit_hash = next_hash;
                 }
                 tx.send(None).unwrap();
             });

@@ -101,6 +101,41 @@ impl CommitObject {
         hasher.update(format!("commit {}\0{}", self.bytes(), self).as_bytes());
         format!("{:x}", hasher.finalize())
     }
+
+    /// SHA1 midstate: committer name より前の固定部分を事前にフィードしたハッシャーを返す。
+    /// committer.name が 40文字の時点で呼ぶこと（bytes() が安定するため）。
+    pub fn prefix_hasher(&self) -> Sha1 {
+        let prefix = match &self.parent {
+            Some(parent) => format!(
+                "commit {}\0tree {}\nparent {}\nauthor {}\ncommitter ",
+                self.bytes(),
+                self.tree,
+                parent,
+                self.author
+            ),
+            None => format!(
+                "commit {}\0tree {}\nauthor {}\ncommitter ",
+                self.bytes(),
+                self.tree,
+                self.author
+            ),
+        };
+        let mut hasher = Sha1::new();
+        hasher.update(prefix.as_bytes());
+        hasher
+    }
+
+    /// committer name より後の固定部分（suffix）をバイト列で返す。
+    pub fn suffix_bytes(&self) -> Vec<u8> {
+        format!(
+            " <{}@{}> {}\n\n{}",
+            self.committer.email_user,
+            self.committer.email_domain,
+            self.committer.time,
+            self.message
+        )
+        .into_bytes()
+    }
 }
 
 // TODO: tests
