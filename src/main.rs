@@ -103,11 +103,51 @@ fn art(c: &Context) {
     }
 
     let new_committer_name = bruteforce(settings.clone(), &co, settings.jobs);
-    command::filter_branch(&settings.path, &latest_commit_hash, &new_committer_name);
-    let latest_commit_hash = command::latest_commit_hash(&settings.path);
+    let new_hash = command::replace_latest_commit(&settings.path, &co, &new_committer_name);
     println!(
         "Yay! Now your new hash of the latest commit is \x1b[31m{}\x1b[m.",
-        latest_commit_hash
+        new_hash
+    );
+}
+
+/// Measure hash rate across `jobs` threads and report aggregate hashes/sec.
+fn bench_hash_rate(commit_object: &CommitObject, jobs: usize) {
+    use std::time::{Duration, Instant};
+
+    let duration = Duration::from_secs(5);
+    let start = Instant::now(); // Instant は Copy なのでスレッドにそのまま渡せる
+    let (tx, rx) = channel::<u64>();
+
+    for i in 0..jobs {
+        let mut co = commit_object.clone();
+        let tx = tx.clone();
+        thread::spawn(move || {
+            co.committer.name.push_str(&i.to_string());
+            co.committer.name = co.to_sha1();
+            let mut hash = co.to_sha1();
+            // midstate: prefix/suffix を一度だけ構築
+            let prefix_hasher = co.prefix_hasher();
+            let suffix = co.suffix_bytes();
+            let mut count: u64 = 0;
+            while start.elapsed() < duration {
+                let mut h = prefix_hasher.clone();
+                h.update(hash.as_bytes()); // 40 bytes (committer name)
+                h.update(&suffix);
+                hash = format!("{:x}", h.finalize());
+                count += 1;
+            }
+            tx.send(count).unwrap();
+        });
+    }
+    drop(tx);
+    let total: u64 = rx.iter().sum();
+    let elapsed = start.elapsed().as_secs_f64();
+    println!(
+        "Benchmark ({} threads): {:.2}M hashes/sec  ({} hashes in {:.1}s)",
+        jobs,
+        total as f64 / elapsed / 1_000_000.0,
+        total,
+        elapsed
     );
 }
 

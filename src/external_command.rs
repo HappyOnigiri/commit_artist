@@ -1,5 +1,7 @@
+use crate::git::commit_object::CommitObject;
 use std::env;
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 /// Check if `git` command exists in your environment
 pub fn check() -> Result<std::process::Output, std::io::Error> {
@@ -60,21 +62,52 @@ pub fn cat_file(path: &str, hash: &str) -> String {
     .expect("Error in getting output")
 }
 
-/// Change committer name of the commit whose hash is specified.
-pub fn filter_branch(path: &str, latest_commit_hash: &str, committer_name: &str) {
+/// Replace the latest commit's committer name using git commit-tree + git reset --soft.
+/// Returns the new commit hash.
+pub fn replace_latest_commit(path: &str, co: &CommitObject, new_committer_name: &str) -> String {
+    let author_email = format!("{}@{}", co.author.email_user, co.author.email_domain);
+    let committer_email = format!("{}@{}", co.committer.email_user, co.committer.email_domain);
+
+    let mut args = vec![
+        "-C".to_owned(), path.to_owned(),
+        "commit-tree".to_owned(), co.tree.clone(),
+    ];
+    if let Some(ref parent) = co.parent {
+        args.push("-p".to_owned());
+        args.push(parent.clone());
+    }
+    args.extend_from_slice(&["-F".to_owned(), "-".to_owned()]);
+
+    let mut child = Command::new("git")
+        .args(&args)
+        .env("GIT_AUTHOR_NAME", &co.author.name)
+        .env("GIT_AUTHOR_EMAIL", &author_email)
+        .env("GIT_AUTHOR_DATE", &co.author.time)
+        .env("GIT_COMMITTER_NAME", new_committer_name)
+        .env("GIT_COMMITTER_EMAIL", &committer_email)
+        .env("GIT_COMMITTER_DATE", &co.committer.time)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Error spawning git commit-tree");
+
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(co.message.as_bytes())
+        .expect("Error writing commit message to git commit-tree");
+
+    let output = child.wait_with_output().expect("Error waiting for git commit-tree");
+    let new_hash = String::from_utf8(output.stdout)
+        .expect("Error reading hash from git commit-tree")
+        .trim_end()
+        .to_owned();
+
     Command::new("git")
-        .args(&[
-            "-C",
-            path,
-            "filter-branch",
-            "-f",
-            "--env-filter",
-            &format!(
-                r#"if [ "$GIT_COMMIT" = '{}' ]; then export GIT_COMMITTER_NAME='{}'; fi"#,
-                latest_commit_hash, committer_name
-            ),
-            "HEAD^..HEAD", //            "HEAD",
-        ])
+        .args(&["-C", path, "reset", "--soft", &new_hash])
         .output()
-        .expect("err");
+        .expect("Error in git reset --soft");
+
+    new_hash
 }
