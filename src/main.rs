@@ -26,7 +26,7 @@ fn main() {
         )
         .flag(
             Flag::new("pattern", FlagType::String)
-                .usage("[optional] --pattern <[0-9a-f]{1,40}>")
+                .usage("[optional] --pattern <[0-9a-f]{1,40}[,[0-9a-f]{1,40}]...>")
                 .alias("p"),
         )
         .flag(

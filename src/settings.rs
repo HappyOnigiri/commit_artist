@@ -83,9 +83,27 @@ mod tests {
     }
 
     #[test]
+    fn settings_constructor_multi_pattern() {
+        let s = Settings::new("./", "1111111,2222222", 20, 10);
+        assert_eq!(s.patterns, vec!["1111111", "2222222"]);
+    }
+
+    #[test]
+    fn settings_constructor_multi_pattern_with_spaces() {
+        let s = Settings::new("./", "1111111, 2222222", 20, 10);
+        assert_eq!(s.patterns, vec!["1111111", "2222222"]);
+    }
+
+    #[test]
     #[should_panic]
     fn nonnominal_settings1() {
         Settings::new("./", "invalidpattern", 20, 10);
+    }
+
+    #[test]
+    #[should_panic]
+    fn nonnominal_settings1_multi() {
+        Settings::new("./", "1111111,invalidpattern", 20, 10);
     }
 
     #[test]
